@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-backend
+  namespace: fraud-detection
+  labels:
+    app: fraud-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-backend
+  template:
+    metadata:
+      labels:
+        app: fraud-backend
+    spec:
+      containers:
+        - name: fraud-backend
+          # Tag de départ ; ensuite le pipeline de déploiement pose un tag immuable
+          # <build>-<commit> avec « kubectl set image ».
+          image: <compte-dockerhub>/fraud-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: backend-config
+          env:
+            # Optionnel : protège /update-drift-metrics et /upload-drift-report.
+            #   kubectl create secret generic fraud-api-secrets -n fraud-detection \
+            #     --from-literal=API_ADMIN_TOKEN="$(openssl rand -hex 32)"
+            - name: API_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fraud-api-secrets
+                  key: API_ADMIN_TOKEN
+                  optional: true
+          # Vie : le processus répond-il ? (/live répond même sans modèle)
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8000
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          # Disponibilité : /health renvoie 503 tant que modèle et processeurs ne sont pas chargés
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

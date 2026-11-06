@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-frontend
+  namespace: fraud-detection
+  labels:
+    app: fraud-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-frontend
+  template:
+    metadata:
+      labels:
+        app: fraud-frontend
+    spec:
+      containers:
+        - name: fraud-frontend
+          # NEXT_PUBLIC_API_URL est figé dans l'image au build (--build-arg du
+          # pipeline de déploiement) : aucune variable d'environnement ne le change ici.
+          image: <compte-dockerhub>/fraud-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "125m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"

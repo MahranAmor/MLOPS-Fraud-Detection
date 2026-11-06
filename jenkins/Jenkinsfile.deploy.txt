@@ -1,0 +1,141 @@
+// =====================================================================
+//  Pipeline de déploiement : champion MLflow -> images Docker taguées
+//                            -> Kubernetes -> rollback automatique si échec
+//
+//  Credentials Jenkins attendus :
+//    dagshub-token          (Secret text)        : DVC + MLflow sur DagsHub
+//    dockerhub-credentials  (Username/Password)  : push sur Docker Hub
+// =====================================================================
+pipeline {
+    agent any
+
+    environment {
+        // --- À renseigner : compte et dépôt DagsHub, compte Docker Hub ---
+        DAGSHUB_USER             = '<utilisateur-dagshub>'
+        DAGSHUB_REPO             = '<depot-dagshub>'
+        DAGSHUB_TOKEN            = credentials('dagshub-token')
+        MLFLOW_TRACKING_URI      = "https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.mlflow"
+        MLFLOW_TRACKING_USERNAME = "${DAGSHUB_USER}"
+        MLFLOW_TRACKING_PASSWORD = credentials('dagshub-token')
+
+        DOCKERHUB_CREDENTIALS    = credentials('dockerhub-credentials')
+        KUBECONFIG               = '/var/jenkins_home/.kube/config'
+        IMAGE_BACKEND            = '<compte-dockerhub>/fraud-backend'
+        IMAGE_FRONTEND           = '<compte-dockerhub>/fraud-frontend'
+        K8S_NAMESPACE            = 'fraud-detection'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                retry(3) { checkout scm }
+                script {
+                    // Tag immuable : numéro de build + commit. « latest » n'est plus qu'un alias.
+                    env.GIT_SHA   = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_SHA}"
+                    currentBuild.description = "images :${env.IMAGE_TAG}"
+                    echo "IMAGE_TAG = ${env.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Pull Artifacts') {
+            steps {
+                sh '''
+                    . /opt/venv-fraud/bin/activate
+                    dvc remote modify origin --local user "${DAGSHUB_USER}"
+                    dvc remote modify origin --local password "${DAGSHUB_TOKEN}"
+                    dvc pull artifacts/preprocessing/ --jobs 1
+                    dvc pull artifacts/mlflow/Best_Fraud_LightGBM/ --jobs 1
+                '''
+            }
+        }
+
+        stage('Fetch Champion Model') {
+            steps {
+                // Le registre MLflow fait foi : on remplace le modèle DVC par le champion actuel
+                sh '. /opt/venv-fraud/bin/activate && python3 jenkins/register_best_model.py --export-champion'
+            }
+        }
+
+        stage('Docker Login') {
+            steps {
+                sh 'echo "${DOCKERHUB_CREDENTIALS_PSW}" | docker login -u "${DOCKERHUB_CREDENTIALS_USR}" --password-stdin'
+            }
+        }
+
+        stage('Build & Push Images') {
+            parallel {
+                stage('Backend') {
+                    steps {
+                        sh '''
+                            docker build -t ${IMAGE_BACKEND}:${IMAGE_TAG} -t ${IMAGE_BACKEND}:latest \
+                                -f backend/Dockerfile .
+                            docker push ${IMAGE_BACKEND}:${IMAGE_TAG}
+                            docker push ${IMAGE_BACKEND}:latest
+                        '''
+                    }
+                }
+                stage('Frontend') {
+                    steps {
+                        sh '''
+                            docker build --network=host \
+                                --build-arg NEXT_PUBLIC_API_URL=http://api.fraud.local \
+                                -t ${IMAGE_FRONTEND}:${IMAGE_TAG} -t ${IMAGE_FRONTEND}:latest \
+                                -f frontend/Dockerfile .
+                            docker push ${IMAGE_FRONTEND}:${IMAGE_TAG}
+                            docker push ${IMAGE_FRONTEND}:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                // Le tag change à chaque build : la spec du Deployment change, donc Kubernetes
+                // lance réellement un rolling update (avec « :latest », set image ne fait rien).
+                sh '''
+                    kubectl set image deployment/fraud-backend fraud-backend=${IMAGE_BACKEND}:${IMAGE_TAG} \
+                        -n ${K8S_NAMESPACE} --kubeconfig=${KUBECONFIG}
+                    kubectl set image deployment/fraud-frontend fraud-frontend=${IMAGE_FRONTEND}:${IMAGE_TAG} \
+                        -n ${K8S_NAMESPACE} --kubeconfig=${KUBECONFIG}
+                    for d in fraud-backend fraud-frontend; do
+                        kubectl annotate deployment/$d -n ${K8S_NAMESPACE} --kubeconfig=${KUBECONFIG} --overwrite \
+                            kubernetes.io/change-cause="Jenkins build ${BUILD_NUMBER} - commit ${GIT_SHA}"
+                    done
+                '''
+            }
+        }
+
+        stage('Rollout Status') {
+            steps {
+                // Si un pod ne devient pas prêt (readinessProbe /health) : retour à la version précédente
+                sh '''
+                    for d in fraud-backend fraud-frontend; do
+                        if ! kubectl rollout status deployment/$d -n ${K8S_NAMESPACE} \
+                                --timeout=300s --kubeconfig=${KUBECONFIG}; then
+                            echo "❌ Rollout de $d en échec : rollback automatique"
+                            kubectl rollout undo deployment/$d -n ${K8S_NAMESPACE} --kubeconfig=${KUBECONFIG}
+                            exit 1
+                        fi
+                    done
+                    kubectl get pods -n ${K8S_NAMESPACE} --kubeconfig=${KUBECONFIG}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout || true'
+        }
+        success {
+            echo "✅ Déployé : ${env.IMAGE_BACKEND}:${env.IMAGE_TAG} et ${env.IMAGE_FRONTEND}:${env.IMAGE_TAG}"
+        }
+        failure {
+            echo '❌ Pipeline de déploiement en échec.'
+        }
+    }
+}

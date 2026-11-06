@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: fraud-detection
+data:
+  MODEL_REGISTRY_DIR: "/app/model_registry"
+  PROCESSORS_DIR: "/app/artifacts/preprocessing"
+  PYTHONUNBUFFERED: "1"

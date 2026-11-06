@@ -1,0 +1,20 @@
+# Dépendances de service de l'API (image Docker du backend).
+# Les versions de scikit-learn, lightgbm, xgboost et catboost doivent rester
+# identiques à celles de requirements.txt (racine) : le modèle est un pickle,
+# il ne se recharge de façon fiable qu'avec les versions qui l'ont produit.
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.6.1
+imbalanced-learn==0.14.0
+# Les quatre algorithmes candidats du pipeline ML : celui qui gagne doit pouvoir être dépicklé
+lightgbm==4.5.0
+xgboost==2.1.4
+catboost==1.2.7
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+pydantic==2.10.3
+python-dotenv==1.0.1
+requests==2.32.3
+mlflow==2.19.0
+prometheus-client==0.21.0

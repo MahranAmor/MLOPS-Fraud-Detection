@@ -1,0 +1,66 @@
+# =====================================================================
+#  Modèle de configuration Alertmanager (kube-prometheus-stack).
+#  Le webhook Slack n'est JAMAIS écrit dans ce fichier : il est injecté
+#  au moment de l'application, depuis une variable d'environnement.
+#
+#    export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...'
+#    envsubst '${SLACK_WEBHOOK_URL}' \
+#      < k8s/monitoring/alertmanager-config.template.yaml | kubectl apply -f -
+#
+#  La liste explicite '${SLACK_WEBHOOK_URL}' empêche envsubst de toucher
+#  aux gabarits Go ({{ ... }}) des messages ci-dessous.
+# =====================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-monitoring-kube-prometheus-alertmanager
+  namespace: monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+    route:
+      group_by: ['alertname', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: 'null'
+      routes:
+        - matchers:
+            - alertname = "Watchdog"
+          receiver: 'null'
+
+        # Only fraud-detection alerts → Slack
+        - matchers:
+            - namespace = "fraud-detection"
+          receiver: 'slack-ml-alerts'
+          continue: false
+
+    inhibit_rules:
+      # If PodCrash active → suppress other fraud alerts
+      - source_matchers:
+          - alertname = "PodCrash"
+        target_matchers:
+          - alertname =~ "HighFraudRate|DriftDetected|HighLatency"
+        equal: ['namespace']
+
+    receivers:
+      - name: 'null'
+
+      - name: 'slack-ml-alerts'
+        slack_configs:
+          - channel: '#ml-alerts'
+            send_resolved: true
+            icon_emoji: ':robot_face:'
+            username: 'AlertManager MLOps'
+            title: '{{ if eq .Status "firing" }}🚨{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+            text: |
+              {{ range .Alerts }}
+              *Alert:* {{ .Annotations.summary }}
+              *Description:* {{ .Annotations.description }}
+              *Severity:* {{ .Labels.severity }}
+              *Since:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+              {{ end }}

@@ -1,0 +1,143 @@
+// =====================================================================
+//  Pipeline ML : validation -> dérive -> ré-entraînement -> champion/challenger
+//                -> test de scénario bloquant -> publication -> déploiement
+//
+//  Credentials Jenkins attendus :
+//    dagshub-token           (Secret text) : DVC + MLflow sur DagsHub
+//    fraud-api-admin-token   (Secret text, optionnel) : voir API_ADMIN_TOKEN ci-dessous
+// =====================================================================
+pipeline {
+    agent any
+
+    environment {
+        // --- DagsHub : renseigner DAGSHUB_USER / DAGSHUB_REPO (votre compte et votre dépôt) ---
+        DAGSHUB_USER             = '<utilisateur-dagshub>'
+        DAGSHUB_REPO             = '<depot-dagshub>'
+        DAGSHUB_TOKEN            = credentials('dagshub-token')
+        MLFLOW_TRACKING_URI      = "https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.mlflow"
+        MLFLOW_TRACKING_USERNAME = "${DAGSHUB_USER}"
+        MLFLOW_TRACKING_PASSWORD = credentials('dagshub-token')
+
+        // --- Cluster (minikube) : adresse de l'API et du Pushgateway vus depuis Jenkins ---
+        API_URL                  = 'http://192.168.49.2:30080'
+        PUSHGATEWAY_URL          = 'http://192.168.49.2:30091'
+        ARTIFACTS_DEST           = '/shared-artifacts'
+
+        // --- Quality gate du test de scénario : nombre minimal de fraudes détectées sur 11 ---
+        MIN_DETECTED             = '9'
+
+        // Si l'API est protégée (secret fraud-api-secrets côté Kubernetes), décommenter :
+        // API_ADMIN_TOKEN       = credentials('fraud-api-admin-token')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                retry(3) { checkout scm }
+                // Aucun résultat d'un build précédent ne doit influencer celui-ci
+                sh 'rm -f artifacts/jenkins/*.txt artifacts/jenkins/*.json artifacts/jenkins/*.html'
+            }
+        }
+
+        stage('Setup Environment') {
+            steps {
+                sh '''
+                    . /opt/venv-fraud/bin/activate
+                    dvc remote modify origin --local user "${DAGSHUB_USER}"
+                    dvc remote modify origin --local password "${DAGSHUB_TOKEN}"
+                    dvc pull data/raws/fraud_600k.csv artifacts/preprocessing/ --jobs 1
+                    dvc pull data/raws/new_data.csv --jobs 1 || echo "Pas de new_data.csv dans le remote"
+                '''
+            }
+        }
+
+        stage('Data Validation') {
+            steps {
+                // Bloquant : des données corrompues n'atteignent jamais l'entraînement
+                sh '. /opt/venv-fraud/bin/activate && python3 jenkins/validate_data.py'
+            }
+        }
+
+        stage('Data Drift Detection') {
+            steps {
+                script {
+                    sh '. /opt/venv-fraud/bin/activate && python3 jenkins/drift_detection.py'
+                    env.DRIFT_DETECTED = readFile('artifacts/jenkins/drift_result.txt').trim()
+                    echo "DRIFT_DETECTED = '${env.DRIFT_DETECTED}'"
+                }
+            }
+        }
+
+        stage('Continuous Training') {
+            when { expression { env.DRIFT_DETECTED == 'true' } }
+            steps {
+                sh '. /opt/venv-fraud/bin/activate && python3 jenkins/train_model.py'
+            }
+        }
+
+        stage('Champion / Challenger') {
+            when { expression { env.DRIFT_DETECTED == 'true' } }
+            steps {
+                script {
+                    sh '. /opt/venv-fraud/bin/activate && python3 jenkins/register_best_model.py'
+                    env.MODEL_PROMOTED = readFile('artifacts/jenkins/promotion.txt').trim()
+                    echo "MODEL_PROMOTED = '${env.MODEL_PROMOTED}' (détail : promotion.json)"
+                }
+            }
+        }
+
+        stage('Scenario Test') {
+            when { expression { env.DRIFT_DETECTED == 'true' } }
+            steps {
+                // Échoue si moins de MIN_DETECTED fraudes sur 11 sont détectées
+                sh '. /opt/venv-fraud/bin/activate && python3 test/test_fraud_scenario.py'
+            }
+        }
+
+        stage('Publish Drift to Backend') {
+            steps {
+                sh '. /opt/venv-fraud/bin/activate && python3 jenkins/publish_drift.py'
+            }
+        }
+
+        stage('Trigger Deploy Pipeline') {
+            when { expression { env.DRIFT_DETECTED == 'true' && env.MODEL_PROMOTED == 'true' } }
+            steps {
+                build job: 'fraud-deploy-pipeline', wait: true
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'artifacts/jenkins/*.html, artifacts/jenkins/*.json',
+                             allowEmptyArchive: true
+            // Copie facultative vers un dossier partagé : ne doit jamais faire échouer le build
+            sh '''
+                if mkdir -p "${ARTIFACTS_DEST}" 2>/dev/null; then
+                    cp -f artifacts/jenkins/drift_result.txt artifacts/jenkins/*.json \
+                          artifacts/jenkins/drift_report.html "${ARTIFACTS_DEST}/" 2>/dev/null || true
+                else
+                    echo "Dossier ${ARTIFACTS_DEST} non accessible : copie ignorée"
+                fi
+            '''
+        }
+        success {
+            sh '. /opt/venv-fraud/bin/activate && python3 jenkins/push_metrics.py 1'
+            script {
+                if (env.DRIFT_DETECTED != 'true') {
+                    echo 'Pas de drift : le modèle en production est conservé.'
+                } else if (env.MODEL_PROMOTED == 'true') {
+                    echo 'Drift : nouveau champion promu, testé et déployé.'
+                } else {
+                    echo 'Drift : le challenger ne bat pas le champion, pas de déploiement.'
+                }
+            }
+        }
+        failure {
+            sh '. /opt/venv-fraud/bin/activate && python3 jenkins/push_metrics.py 0'
+            echo 'Pipeline ML en échec (validation, entraînement ou test de scénario).'
+        }
+    }
+}

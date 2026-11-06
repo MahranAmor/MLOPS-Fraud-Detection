@@ -1,0 +1,125 @@
+##################################
+# 💻 SYSTEM
+##################################
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+
+##################################
+# 🐍 PYTHON
+##################################
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+##################################
+# 🔐 SECRETS
+##################################
+.env
+.env.*
+!.env.example
+# Config Alertmanager rendue avec le vrai webhook (seul le .template.yaml est versionné)
+k8s/monitoring/alertmanager-secret.yaml
+
+##################################
+# 📊 ML / DATA SCIENCE
+##################################
+
+# MLflow (suivi local : base SQLite + artefacts)
+mlruns/
+mlartifacts/
+mlflow.db
+
+# DVC cache
+.dvc/cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+##################################
+# 📦 DATA & MODELS (Large files)
+# 👉 gérés par DVC
+##################################
+data/
+artifacts/
+models/
+
+# Modèles pickle
+*.pkl
+
+##################################
+# ⚛️ FRONTEND — Next.js
+##################################
+node_modules/
+.next/
+out/
+build/
+
+# Logs npm/yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+##################################
+# 🧪 TESTS
+##################################
+.pytest_cache/
+coverage/
+htmlcov/
+
+##################################
+# 🐳 DOCKER
+##################################
+*.tar
+*.log
+
+##################################
+# 🧪 JENKINS
+##################################
+jenkins/jenkins_home/
+
+##################################
+# 🧾 IDE / EDITORS
+##################################
+.vscode/
+.idea/
+*.swp
+*.swo
+
+##################################
+# 📁 BUILD / DIST
+##################################
+build/
+dist/
+*.egg-info/
+
+##################################
+# 📁 TEMP FILES
+##################################
+*.tmp
+*.bak
+*.cache
+
+# Testing venv
+testing/.venv_deepchecks/
+
+# CatBoost
+catboost_info/
+notebooks/catboost_info/
+/data
+/artifacts
+
+##################################
+# 📚 SUPPORTS DE COURS (hors dépôt)
+##################################
+# Livres de référence : PDF commerciaux, ne pas publier
+books/
+# Vidéos : trop volumineuses pour Git (limite GitHub 100 Mo/fichier)
+*.mp4

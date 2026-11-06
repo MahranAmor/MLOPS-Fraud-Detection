@@ -1,0 +1,66 @@
+# ====================================================================
+# Docker Compose - Fraud Detection (API + frontend), lancement local
+# Prérequis : dvc pull artifacts/preprocessing/ artifacts/mlflow/Best_Fraud_LightGBM/
+# ====================================================================
+
+services:
+  # Service API Backend
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: fraud_detection_api
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_REGISTRY_DIR=/app/model_registry
+      - PROCESSORS_DIR=/app/artifacts/preprocessing
+      - PYTHONUNBUFFERED=1
+      # - FRAUD_THRESHOLD=0.5        # force le seuil (sinon : celui de metadata.json)
+      # - API_ADMIN_TOKEN=changeme   # protège les endpoints d'écriture Jenkins
+    networks:
+      - fraud-net
+    restart: unless-stopped
+    # /health renvoie 503 tant que le modèle n'est pas chargé : le frontend attend un état sain
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Service Frontend Next.js
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Figé dans le JavaScript au build : une variable d'environnement au runtime n'aurait aucun effet
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: fraud_detection_frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - fraud-net
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+# Réseau pour la communication entre services
+networks:
+  fraud-net:
+    driver: bridge
+    name: fraud_detection_network
+
+# ====================================================================
+# Commandes utiles :
+# - Build : docker-compose build
+# - Start : docker-compose up -d
+# - Logs backend  : docker-compose logs -f api
+# - Logs frontend : docker-compose logs -f frontend
+# - Logs tout     : docker-compose logs -f
+# - Stop  : docker-compose down
+# - Shell backend  : docker-compose exec api /bin/bash
+# - Shell frontend : docker-compose exec frontend /bin/sh
+# ====================================================================
