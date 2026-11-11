@@ -34,18 +34,20 @@ METADATA_PATH = MODEL_DIR / "1.0.0" / "metadata.json"
 RESULT_PATH = ROOT / "artifacts" / "jenkins" / "scenario_test.json"
 MIN_DETECTED = int(os.getenv("MIN_DETECTED", "9"))
 
+# Transactions complètes (state, zip, city_pop, job réels, tirés de fraud_600k.csv) : avec des
+# champs absents, l'API applique des valeurs par défaut et le test ne mesure plus le vrai modèle.
 FRAUDS = [
-    {'trans_date_trans_time': '2019-08-18 22:10:52', 'category': 'travel', 'amt': 11.39, 'gender': 'M', 'lat': 27.9611, 'long': -81.9398, 'dob': '1961-09-28', 'merch_lat': 27.400606, 'merch_long': -82.452533, 'zip': 0},
-    {'trans_date_trans_time': '2019-02-07 17:44:29', 'category': 'home', 'amt': 392.42, 'gender': 'F', 'lat': 36.7558, 'long': -83.1838, 'dob': '1967-02-04', 'merch_lat': 35.93273, 'merch_long': -83.199834, 'zip': 0},
-    {'trans_date_trans_time': '2019-05-27 00:05:59', 'category': 'gas_transport', 'amt': 8.29, 'gender': 'M', 'lat': 38.4921, 'long': -85.4524, 'dob': '1996-04-10', 'merch_lat': 38.028499, 'merch_long': -86.211533, 'zip': 0},
-    {'trans_date_trans_time': '2019-04-29 00:59:29', 'category': 'grocery_pos', 'amt': 298.19, 'gender': 'F', 'lat': 39.8127, 'long': -120.6405, 'dob': '1967-05-27', 'merch_lat': 40.387359, 'merch_long': -120.874787, 'zip': 0},
-    {'trans_date_trans_time': '2019-02-25 02:20:08', 'category': 'gas_transport', 'amt': 14.02, 'gender': 'F', 'lat': 40.9086, 'long': -73.8221, 'dob': '1937-04-16', 'merch_lat': 40.31936, 'merch_long': -74.24485899999999, 'zip': 0},
-    {'trans_date_trans_time': '2019-02-04 22:16:37', 'category': 'grocery_pos', 'amt': 290.79, 'gender': 'M', 'lat': 34.5444, 'long': -102.1069, 'dob': '1980-07-30', 'merch_lat': 34.67073, 'merch_long': -102.423796, 'zip': 0},
-    {'trans_date_trans_time': '2019-04-08 22:33:43', 'category': 'misc_net', 'amt': 818.46, 'gender': 'M', 'lat': 42.4999, 'long': -74.6117, 'dob': '1968-07-01', 'merch_lat': 42.655614, 'merch_long': -75.44143100000001, 'zip': 0},
-    {'trans_date_trans_time': '2019-02-08 09:13:24', 'category': 'grocery_pos', 'amt': 299.18, 'gender': 'M', 'lat': 46.4959, 'long': -90.4383, 'dob': '1986-04-15', 'merch_lat': 47.276442, 'merch_long': -89.828935, 'zip': 0},
-    {'trans_date_trans_time': '2019-05-06 22:33:13', 'category': 'kids_pets', 'amt': 21.68, 'gender': 'F', 'lat': 39.6251, 'long': -82.7552, 'dob': '1992-10-03', 'merch_lat': 39.663598, 'merch_long': -82.98897099999999, 'zip': 0},
-    {'trans_date_trans_time': '2019-06-23 02:58:24', 'category': 'misc_net', 'amt': 752.39, 'gender': 'F', 'lat': 41.1573, 'long': -88.0619, 'dob': '1990-04-25', 'merch_lat': 41.679054, 'merch_long': -88.486789, 'zip': 0},
-    {'trans_date_trans_time': '2019-04-17 22:00:30', 'category': 'shopping_net', 'amt': 993.93, 'gender': 'M', 'lat': 26.9379, 'long': -82.2388, 'dob': '1984-08-31', 'merch_lat': 26.78667, 'merch_long': -81.7518, 'zip': 0},
+    {'trans_date_trans_time': '2019-08-18 22:10:52', 'category': 'travel', 'amt': 11.39, 'gender': 'M', 'lat': 27.9611, 'long': -81.9398, 'dob': '1961-09-28', 'merch_lat': 27.400606, 'merch_long': -82.452533, 'zip': 33813, 'state': 'FL', 'city_pop': 237282, 'job': 'Radiographer, therapeutic'},
+    {'trans_date_trans_time': '2019-02-07 17:44:29', 'category': 'home', 'amt': 392.42, 'gender': 'F', 'lat': 36.7558, 'long': -83.1838, 'dob': '1967-02-04', 'merch_lat': 35.93273, 'merch_long': -83.199834, 'zip': 40820, 'state': 'KY', 'city_pop': 581, 'job': 'Psychologist, counselling'},
+    {'trans_date_trans_time': '2019-05-27 00:05:59', 'category': 'gas_transport', 'amt': 8.29, 'gender': 'M', 'lat': 38.4921, 'long': -85.4524, 'dob': '1996-04-10', 'merch_lat': 38.028499, 'merch_long': -86.211533, 'zip': 40077, 'state': 'KY', 'city_pop': 564, 'job': 'Pensions consultant'},
+    {'trans_date_trans_time': '2019-04-29 00:59:29', 'category': 'grocery_pos', 'amt': 298.19, 'gender': 'F', 'lat': 39.8127, 'long': -120.6405, 'dob': '1967-05-27', 'merch_lat': 40.387359, 'merch_long': -120.874787, 'zip': 96103, 'state': 'CA', 'city_pop': 1725, 'job': 'Chartered legal executive (England and Wales)'},
+    {'trans_date_trans_time': '2019-02-25 02:20:08', 'category': 'gas_transport', 'amt': 14.02, 'gender': 'F', 'lat': 40.9086, 'long': -73.8221, 'dob': '1937-04-16', 'merch_lat': 40.31936, 'merch_long': -74.24485899999999, 'zip': 10553, 'state': 'NY', 'city_pop': 67100, 'job': 'Chief of Staff'},
+    {'trans_date_trans_time': '2019-02-04 22:16:37', 'category': 'grocery_pos', 'amt': 290.79, 'gender': 'M', 'lat': 34.5444, 'long': -102.1069, 'dob': '1980-07-30', 'merch_lat': 34.67073, 'merch_long': -102.423796, 'zip': 79063, 'state': 'TX', 'city_pop': 686, 'job': 'Petroleum engineer'},
+    {'trans_date_trans_time': '2019-04-08 22:33:43', 'category': 'misc_net', 'amt': 818.46, 'gender': 'M', 'lat': 42.4999, 'long': -74.6117, 'dob': '1968-07-01', 'merch_lat': 42.655614, 'merch_long': -75.44143100000001, 'zip': 12093, 'state': 'NY', 'city_pop': 1666, 'job': 'Diagnostic radiographer'},
+    {'trans_date_trans_time': '2019-02-08 09:13:24', 'category': 'grocery_pos', 'amt': 299.18, 'gender': 'M', 'lat': 46.4959, 'long': -90.4383, 'dob': '1986-04-15', 'merch_lat': 47.276442, 'merch_long': -89.828935, 'zip': 54559, 'state': 'WI', 'city_pop': 795, 'job': 'Television/film/video producer'},
+    {'trans_date_trans_time': '2019-05-06 22:33:13', 'category': 'kids_pets', 'amt': 21.68, 'gender': 'F', 'lat': 39.6251, 'long': -82.7552, 'dob': '1992-10-03', 'merch_lat': 39.663598, 'merch_long': -82.98897099999999, 'zip': 43102, 'state': 'OH', 'city_pop': 4512, 'job': 'Farm manager'},
+    {'trans_date_trans_time': '2019-06-23 02:58:24', 'category': 'misc_net', 'amt': 752.39, 'gender': 'F', 'lat': 41.1573, 'long': -88.0619, 'dob': '1990-04-25', 'merch_lat': 41.679054, 'merch_long': -88.486789, 'zip': 60913, 'state': 'IL', 'city_pop': 1617, 'job': 'Medical secretary'},
+    {'trans_date_trans_time': '2019-04-17 22:00:30', 'category': 'shopping_net', 'amt': 993.93, 'gender': 'M', 'lat': 26.9379, 'long': -82.2388, 'dob': '1984-08-31', 'merch_lat': 26.78667, 'merch_long': -81.7518, 'zip': 33981, 'state': 'FL', 'city_pop': 79008, 'job': 'Quantity surveyor'},
 ]
 
 
