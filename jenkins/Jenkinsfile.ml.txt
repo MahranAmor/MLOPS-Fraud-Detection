@@ -11,8 +11,8 @@ pipeline {
 
     environment {
         // --- DagsHub : renseigner DAGSHUB_USER / DAGSHUB_REPO (votre compte et votre dépôt) ---
-        DAGSHUB_USER             = '<utilisateur-dagshub>'
-        DAGSHUB_REPO             = '<depot-dagshub>'
+        DAGSHUB_USER             = 'MahranAmor'
+        DAGSHUB_REPO             = 'mlops-fraud-detection'
         DAGSHUB_TOKEN            = credentials('dagshub-token')
         MLFLOW_TRACKING_URI      = "https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.mlflow"
         MLFLOW_TRACKING_USERNAME = "${DAGSHUB_USER}"
@@ -27,7 +27,7 @@ pipeline {
         MIN_DETECTED             = '9'
 
         // Si l'API est protégée (secret fraud-api-secrets côté Kubernetes), décommenter :
-        // API_ADMIN_TOKEN       = credentials('fraud-api-admin-token')
+        API_ADMIN_TOKEN          = credentials('fraud-api-admin-token')
     }
 
     stages {

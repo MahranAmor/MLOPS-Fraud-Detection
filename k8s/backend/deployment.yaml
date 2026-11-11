@@ -19,7 +19,7 @@ spec:
         - name: fraud-backend
           # Tag de départ ; ensuite le pipeline de déploiement pose un tag immuable
           # <build>-<commit> avec « kubectl set image ».
-          image: <compte-dockerhub>/fraud-backend:latest
+          image: mahranamor/fraud-backend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

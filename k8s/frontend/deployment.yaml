@@ -19,7 +19,7 @@ spec:
         - name: fraud-frontend
           # NEXT_PUBLIC_API_URL est figé dans l'image au build (--build-arg du
           # pipeline de déploiement) : aucune variable d'environnement ne le change ici.
-          image: <compte-dockerhub>/fraud-frontend:latest
+          image: mahranamor/fraud-frontend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

@@ -11,8 +11,8 @@ pipeline {
 
     environment {
         // --- À renseigner : compte et dépôt DagsHub, compte Docker Hub ---
-        DAGSHUB_USER             = '<utilisateur-dagshub>'
-        DAGSHUB_REPO             = '<depot-dagshub>'
+        DAGSHUB_USER             = 'MahranAmor'
+        DAGSHUB_REPO             = 'mlops-fraud-detection'
         DAGSHUB_TOKEN            = credentials('dagshub-token')
         MLFLOW_TRACKING_URI      = "https://dagshub.com/${DAGSHUB_USER}/${DAGSHUB_REPO}.mlflow"
         MLFLOW_TRACKING_USERNAME = "${DAGSHUB_USER}"
@@ -20,8 +20,8 @@ pipeline {
 
         DOCKERHUB_CREDENTIALS    = credentials('dockerhub-credentials')
         KUBECONFIG               = '/var/jenkins_home/.kube/config'
-        IMAGE_BACKEND            = '<compte-dockerhub>/fraud-backend'
-        IMAGE_FRONTEND           = '<compte-dockerhub>/fraud-frontend'
+        IMAGE_BACKEND            = 'mahranamor/fraud-backend'
+        IMAGE_FRONTEND           = 'mahranamor/fraud-frontend'
         K8S_NAMESPACE            = 'fraud-detection'
     }
 

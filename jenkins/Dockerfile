@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y \
 
 # TARGETARCH est fourni par BuildKit (amd64 sur PC, arm64 sur Mac Apple Silicon)
 ARG TARGETARCH
-RUN curl -LO "https://dl.k8s.io/release/v1.32.2/bin/linux/${TARGETARCH:-amd64}/kubectl" && \
+RUN curl -LO "https://dl.k8s.io/release/v1.37.2/bin/linux/${TARGETARCH:-amd64}/kubectl" && \
     chmod +x kubectl && mv kubectl /usr/local/bin/kubectl
 
 # Dépendances ML pré-installées : requirements.txt (racine) contient déjà dvc,
