@@ -112,10 +112,11 @@ pipeline {
         stage('Rollout Status') {
             steps {
                 // Si un pod ne devient pas prêt (readinessProbe /health) : retour à la version précédente
+                // 900 s : l'image backend (~3 Go) peut mettre plus de 5 min à être tirée depuis Docker Hub
                 sh '''
                     for d in fraud-backend fraud-frontend; do
                         if ! kubectl rollout status deployment/$d -n ${K8S_NAMESPACE} \
-                                --timeout=300s --kubeconfig=${KUBECONFIG}; then
+                                --timeout=900s --kubeconfig=${KUBECONFIG}; then
                             echo "❌ Rollout de $d en échec : rollback automatique"
                             kubectl rollout undo deployment/$d -n ${K8S_NAMESPACE} --kubeconfig=${KUBECONFIG}
                             exit 1
