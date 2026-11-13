@@ -18,5 +18,7 @@ python-multipart==0.0.20
 pydantic==2.10.3
 python-dotenv==1.0.1
 requests==2.32.3
-mlflow==2.19.0
+# Pas de mlflow ici : l'API charge un pickle exporté (model.pkl + metadata.json) et
+# n'interroge jamais le registre. mlflow reste dans requirements.txt (racine) pour
+# les notebooks et le pipeline Jenkins.
 prometheus-client==0.21.0
