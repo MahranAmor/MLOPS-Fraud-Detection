@@ -38,6 +38,8 @@ Le dépôt sert aussi de fil rouge au **cours MLOps** dont le support compilé e
 
 ## 🏗️ Architecture
 
+![Architecture MLOps du projet : données, versionnement, CI/CD/CT, Kubernetes, supervision](docs/architecture.svg)
+
 ```mermaid
 flowchart LR
     subgraph Data ["Données (DVC + DagsHub)"]
