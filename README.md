@@ -519,6 +519,10 @@ Rappel : le ré-entraînement relit `preprocessed_data.pkl` et non `new_data.csv
 ### 9. Exploitation au quotidien
 
 ```bash
+# Trafic de démonstration pour la page Live (http://fraud.local/live) : rejoue des
+# transactions réelles de fraud_600k.csv, une par seconde, dont 20 % de fraudes
+python scripts/simulate_live_traffic.py --n 100 --interval 1 --fraud-share 0.2
+
 # Journaux et état
 kubectl logs -f deployment/fraud-backend -n fraud-detection
 kubectl get pods,svc,ingress -n fraud-detection
@@ -617,6 +621,8 @@ conserver les résultats (rapport), exporter d'abord : `jupyter nbconvert --to h
 │   ├── frontend/                  # Deployment, Service
 │   └── monitoring/                # ServiceMonitors, règles d'alerte, modèle de config Alertmanager
 ├── notebooks/                     # 01 EDA → 02 préprocessing → 03 modélisation → 04 registre
+├── scripts/
+│   └── simulate_live_traffic.py   # trafic de démonstration vers /predict (page Live)
 ├── test/                          # tests pytest (voir ci-dessus)
 ├── testing/                       # notebook Deepchecks et ses dépendances
 ├── slides/main.pdf                # support du cours MLOps (Beamer, 194 pages)
@@ -697,6 +703,7 @@ calculé sur la validation) › `0,5`. Le test de scénario applique exactement 
 | `GET` | `/features` | Features attendues par le modèle |
 | `POST` | `/predict` | Une transaction ou une liste ; renvoie `predictions`, `probabilities`, `threshold` |
 | `POST` | `/predictCSV` | CSV en entrée ; CSV enrichi de `predict` et `fraud_probability` en sortie |
+| `GET` | `/stream` | Flux temps réel (Server-Sent Events) des prédictions de `/predict` : page **Live** |
 | `GET` | `/metrics` | Métriques Prometheus |
 | `GET` | `/metrics-summary` | Synthèse pour la page Monitoring (percentiles calculés depuis l'histogramme) |
 | `GET` | `/drift-status`, `/drift-report` | Dernière dérive publiée et rapport Evidently HTML |
@@ -816,6 +823,8 @@ Revenir à la version précédente : `kubectl rollout undo deployment/fraud-back
   préprocessing, avec redéploiement des processeurs.
 * **L'état de dérive vit en mémoire** dans l'API : un redémarrage du pod l'efface jusqu'au prochain
   build Jenkins.
+* **Le flux `/stream` est propre à chaque pod** : avec plusieurs réplicas, un client ne verrait que
+  les prédictions du pod qui le sert (il faudrait un bus partagé, Redis par exemple).
 * **Le feature engineering est écrit deux fois** (`preprocessing.py` et `InferencePreprocessor`) ;
   le notebook 02 (section 11) vérifie que les deux restent identiques.
 * Une catégorie inconnue est remplacée par la première classe connue, et un champ absent du JSON

@@ -39,10 +39,16 @@ export default function LivePage() {
   const [stats, setStats] = useState({ total: 0, frauds: 0 });
   const esRef = useRef<EventSource | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // À chaque (re)connexion l'API renvoie les dernières prédictions : on ignore celles déjà vues
+  const seenIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const es = createLiveStream(
       (data: LiveTransaction) => {
+        if (data.id) {
+          if (seenIds.current.has(data.id)) return;
+          seenIds.current.add(data.id);
+        }
         const tx = {
           ...data,
           id: data.id || Date.now().toString(),
@@ -124,12 +130,12 @@ export default function LivePage() {
         <div className="card" style={{ padding: '60px 32px', textAlign: 'center' }}>
           <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.4 }}>📡</div>
           <div style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            {unavailable ? 'Live stream not available yet' : 'Waiting for transactions...'}
+            {unavailable ? 'Live stream not available' : 'Waiting for transactions...'}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             {unavailable
-              ? 'The API does not expose a real-time stream. Use Predict or Batch to score transactions.'
-              : 'Transactions will appear here in real-time as they come in.'}
+              ? 'Your browser does not support Server-Sent Events.'
+              : 'Every prediction made through the API appears here instantly: use the Predict page, or run scripts/simulate_live_traffic.py.'}
           </div>
         </div>
       )}

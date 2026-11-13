@@ -4,6 +4,7 @@ aucun artefact DVC n'est nécessaire.
 
     pytest test/test_api_mock.py
 """
+import asyncio
 import os
 import pickle
 import sys
@@ -91,6 +92,29 @@ def test_predict_applies_decision_threshold(mock_mod, mock_prep):
         assert client.post("/predict", json=sample_data).json()["predictions"] == [0]
     with patch('api.decision_threshold', 0.6):
         assert client.post("/predict", json=sample_data).json()["predictions"] == [1]
+
+
+@patch('api.decision_threshold', 0.5)
+@patch('api.preprocessor')
+@patch('api.model', new_callable=lambda: fake_model(0.7))
+def test_predict_publishes_to_live_stream(mock_mod, mock_prep):
+    # Chaque prédiction de /predict part vers les clients de /stream (page Live)
+    mock_prep.preprocess_inference.return_value = pd.DataFrame([1])
+    queue = asyncio.Queue()
+    api.live_subscribers.add(queue)
+    try:
+        payload = {**sample_data, "merchant": "Kirlin and Sons", "name": "Jane Doe"}
+        assert client.post("/predict", json=payload).status_code == 200
+    finally:
+        api.live_subscribers.discard(queue)
+
+    event = queue.get_nowait()
+    assert event["is_fraud"] is True
+    assert event["probability"] == pytest.approx(0.7)
+    assert (event["merchant"], event["name"], event["amt"]) == ("Kirlin and Sons", "Jane Doe", 100.0)
+    # Les champs d'affichage ne doivent jamais atteindre le modèle
+    sent = mock_prep.preprocess_inference.call_args[0][0]
+    assert not {"merchant", "name"} & set(sent.columns)
 
 
 @patch('api.preprocessor')

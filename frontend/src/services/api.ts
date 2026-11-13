@@ -128,13 +128,23 @@ export async function getModelInfo() {
   return response.json();
 }
 /**
- * Live stream - Non implémenté : le backend n'expose aucun flux (SSE).
- * Renvoie null au lieu de lever une exception, pour que la page Live affiche
- * un message au lieu de faire planter toute l'application.
+ * Live stream : flux Server-Sent Events de l'API (GET /stream), une entrée par
+ * prédiction faite via /predict. EventSource se reconnecte tout seul après une
+ * coupure. Renvoie null si le navigateur ne connaît pas EventSource (rendu serveur).
  */
 export function createLiveStream(
   onMessage: (data: any) => void,
   onError: (error: Event) => void
 ): EventSource | null {
-  return null;
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return null;
+  const es = new EventSource(`${API_BASE_URL}/stream`);
+  es.onmessage = (event) => {
+    try {
+      onMessage(JSON.parse(event.data));
+    } catch {
+      // message illisible : ignoré
+    }
+  };
+  es.onerror = onError;
+  return es;
 }

@@ -10,6 +10,7 @@ Endpoints publics
     GET  /model-metadata   métadonnées résumées (page Monitoring)
     POST /predict          une transaction ou une liste de transactions (JSON)
     POST /predictCSV       fichier CSV -> CSV enrichi des colonnes predict et fraud_probability
+    GET  /stream           flux temps réel (Server-Sent Events) des prédictions faites par /predict
     GET  /metrics          métriques Prometheus (format OpenMetrics)
     GET  /metrics-summary  synthèse des métriques pour le frontend
     GET  /drift-status     dernier résultat de dérive publié par Jenkins
@@ -29,7 +30,9 @@ Variables d'environnement
     PROMETHEUS_URL       serveur Prometheus interrogé par /metrics-summary
     DRIFT_STATE_DIR      dossier lu au démarrage pour restaurer l'état de dérive
 """
+import asyncio
 import io
+import itertools
 import json
 import os
 import pickle
@@ -44,7 +47,7 @@ import numpy as np
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from prometheus_client import Counter, Gauge, Histogram, make_asgi_app
@@ -63,6 +66,8 @@ DEFAULT_DRIFT_STATE_DIR = REPO_ROOT / "artifacts" / "jenkins"
 DEFAULT_PROMETHEUS_URL = "http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
 DEFAULT_THRESHOLD = 0.5
 FRAUD_RATE_WINDOW = 1000   # nombre de prédictions récentes utilisées pour fraud_rate_current
+LIVE_REPLAY_SIZE = 20      # prédictions récentes renvoyées à un client qui ouvre /stream
+LIVE_KEEPALIVE_S = 15      # commentaire SSE périodique : évite la coupure par l'Ingress (60 s)
 
 app = FastAPI(
     title="Fraud Detection API",
@@ -119,6 +124,13 @@ preprocessor = None
 model_metadata = {}
 decision_threshold = DEFAULT_THRESHOLD
 recent_predictions = deque(maxlen=FRAUD_RATE_WINDOW)
+
+# Flux temps réel (/stream) : en mémoire, propre à chaque pod. Avec plusieurs
+# réplicas, chaque client ne verrait que les prédictions de son pod (il faudrait
+# un bus partagé, Redis par exemple).
+live_events = deque(maxlen=LIVE_REPLAY_SIZE)
+live_subscribers: set = set()
+live_event_ids = itertools.count(1)
 
 # L'état de dérive vit en mémoire : Jenkins le pousse par HTTP après chaque
 # exécution du pipeline ML. Un redémarrage du pod le remet à zéro (voir README).
@@ -315,6 +327,38 @@ def _record_predictions(predictions: np.ndarray):
         FRAUD_RATE.set(sum(recent_predictions) / len(recent_predictions))
 
 
+def _publish_live(items: list, predictions: np.ndarray, proba) -> None:
+    """Diffuse chaque prédiction aux clients ouverts sur /stream.
+
+    Appelée depuis une route async, donc dans la boucle d'événements : put_nowait
+    est sûr. Un client trop lent (file pleine) perd des événements au lieu de
+    ralentir /predict.
+    """
+    now = datetime.now().strftime("%H:%M:%S")
+    for i, item in enumerate(items):
+        event = {
+            "id": str(next(live_event_ids)),
+            "name": item.name,
+            "merchant": item.merchant,
+            "category": item.category,
+            "amt": round(float(item.amt), 2),
+            "is_fraud": bool(predictions[i]),
+            "prediction": int(predictions[i]),
+            "probability": None if proba is None else round(float(proba[i]), 4),
+            "timestamp": now,
+        }
+        live_events.append(event)
+        for queue in list(live_subscribers):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+
+def _sse(event: dict) -> str:
+    return f"id: {event['id']}\ndata: {json.dumps(event)}\n\n"
+
+
 def _sample_value(metric, suffix="", **labels) -> float:
     """Lit une valeur via l'API publique collect() (sans attribut privé _value)."""
     for family in metric.collect():
@@ -415,6 +459,12 @@ class TransactionInput(BaseModel):
     state: str = "NY"
     job: str = "Developer"
     dob: str = "1990-01-01"
+    # Affichage seulement (flux /stream) : jamais transmis au modèle
+    merchant: Optional[str] = None
+    name: Optional[str] = None
+
+
+DISPLAY_ONLY_FIELDS = {"merchant", "name"}
 
 
 @app.post("/predict")
@@ -425,7 +475,7 @@ async def predict(request: Union[TransactionInput, List[TransactionInput]]):
     start_time = time.time()
     try:
         items = request if isinstance(request, list) else [request]
-        df_input = pd.DataFrame([item.model_dump() for item in items])
+        df_input = pd.DataFrame([item.model_dump(exclude=DISPLAY_ONLY_FIELDS) for item in items])
         predictions, proba = _predict(df_input)
     except Exception as e:
         PREDICTION_ERRORS.inc()
@@ -434,6 +484,7 @@ async def predict(request: Union[TransactionInput, List[TransactionInput]]):
 
     duration = time.time() - start_time
     _record_predictions(predictions)
+    _publish_live(items, predictions, proba)
     PREDICTION_LATENCY.observe(duration)
     HTTP_REQUEST_LATENCY.labels(endpoint='/predict').observe(duration)
     HTTP_REQUESTS_TOTAL.labels(method='POST', endpoint='/predict', status='200').inc()
@@ -444,6 +495,39 @@ async def predict(request: Union[TransactionInput, List[TransactionInput]]):
         "threshold": decision_threshold,
         "count": len(predictions),
     }
+
+
+@app.get("/stream")
+async def live_stream(request: Request):
+    """Flux Server-Sent Events des prédictions de /predict (page Live du frontend).
+
+    À l'ouverture, renvoie les dernières prédictions, puis chaque nouvelle dès
+    qu'elle est faite. Un commentaire « keep-alive » est envoyé toutes les
+    LIVE_KEEPALIVE_S secondes pour que l'Ingress ne ferme pas la connexion.
+    """
+    queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+    live_subscribers.add(queue)
+
+    async def events():
+        try:
+            yield "retry: 3000\n\n"
+            for event in list(live_events):
+                yield _sse(event)
+            while not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=LIVE_KEEPALIVE_S)
+                    yield _sse(event)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            live_subscribers.discard(queue)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        # X-Accel-Buffering : l'Ingress nginx transmet chaque événement sans le mettre en tampon
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/predictCSV")
