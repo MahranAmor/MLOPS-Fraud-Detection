@@ -8,7 +8,9 @@ scikit-learn==1.6.1
 imbalanced-learn==0.14.0
 # Les quatre algorithmes candidats du pipeline ML : celui qui gagne doit pouvoir être dépicklé
 lightgbm==4.5.0
-xgboost==2.1.4
+# xgboost-cpu : même version et même « import xgboost » que xgboost==2.1.4 (racine),
+# sans les bibliothèques CUDA/NCCL (~750 Mo) inutiles : l'API tourne sur CPU.
+xgboost-cpu==2.1.4
 catboost==1.2.7
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
