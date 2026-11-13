@@ -421,12 +421,18 @@ DOCKER_GID=$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock alpine
 
 docker run -d --name jenkins --restart unless-stopped \
   -p 8080:8080 -p 50000:50000 \
-  --network minikube --group-add "$DOCKER_GID" \
+  --network minikube --ip 192.168.49.100 --group-add "$DOCKER_GID" \
   -v jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$HOME/fraud-shared-artifacts:/shared-artifacts" \
   fraud-jenkins
 ```
+
+> **IP fixe obligatoire.** Sans `--ip`, Docker attribue à Jenkins la première adresse libre du
+> réseau `minikube`. Au redémarrage de la machine, Jenkins (`--restart unless-stopped`) démarre
+> avant minikube et prend `192.168.49.2` : `minikube start` échoue alors avec
+> `Address already in use`. Pour corriger un conteneur existant :
+> `docker network disconnect minikube jenkins && minikube start && docker network connect --ip 192.168.49.100 minikube jenkins`.
 
 Donner à Jenkins l'accès au cluster (le kubeconfig de l'hôte pointe souvent vers `127.0.0.1`,
 inaccessible depuis le conteneur : on le réécrit vers l'IP de minikube) :
@@ -546,7 +552,17 @@ dvc status                                  # data/ et artifacts/ modifiés par 
 ```
 
 Avant un commit de notebook, retirer les sorties : `pip install nbstripout && nbstripout --install`
-(filtre Git automatique).
+(filtre Git automatique, à refaire après chaque clone : il vit dans `.git/config`). Pour qu'une
+simple réexécution ne produise aucun diff, retirer aussi les cellules vides et la version de Python,
+en gardant les identifiants de cellules :
+
+```bash
+git config filter.nbstripout.clean "$(git config filter.nbstripout.clean) --drop-empty-cells --keep-id"
+git config filter.nbstripout.extrakeys "metadata.language_info"
+```
+
+Les fichiers locaux gardent leurs sorties ; seule la version commitée en est dépourvue. Pour
+conserver les résultats (rapport), exporter d'abord : `jupyter nbconvert --to html notebooks/0*.ipynb`.
 
 ### 10. Dépannage
 
@@ -561,6 +577,9 @@ Avant un commit de notebook, retirer les sorties : `pip install nbstripout && nb
 | Jenkins : `permission denied … docker.sock` | groupe du socket non ajouté | relancer le conteneur avec `--group-add` (étape 7.1) |
 | Jenkins : `Unable to connect to the server` | kubeconfig vers `127.0.0.1`, ou conteneur hors du réseau `minikube` | étape 7.1 (`sed` sur `server:` et `--network minikube`) |
 | Jenkins : `exec format error` sur `kubectl` | binaire d'une autre architecture | reconstruire l'image Jenkins (elle suit désormais l'architecture de la machine) |
+| `minikube start` : `Address already in use` | Jenkins a pris `192.168.49.2` sur le réseau `minikube` | étape 7.1 (encadré « IP fixe ») |
+| Déploiement : `rollout status` expire, puis `rollout undo` | image backend encore en téléchargement dans minikube | délai de 900 s dans le Jenkinsfile ; en local, `minikube image load <image>:<tag>` évite Docker Hub |
+| Déploiement : `dvc pull` → `Can't remove the following unsaved files` | `metadata.json` réécrit par le build précédent dans le workspace | `dvc pull --force` (déjà dans `Jenkinsfile.deploy.txt`) |
 | Stage *Data Validation* rouge | lot invalide (colonnes, valeurs nulles, bornes, catégories) | lire `data_validation.json` dans les artefacts du build |
 | Stage *Scenario Test* rouge | moins de `MIN_DETECTED` fraudes détectées avec le seuil du modèle | lire `scenario_test.json` ; ajuster `MIN_DETECTED` ou le seuil, ou ne pas promouvoir ce modèle |
 | `Push vers le Pushgateway impossible` | Pushgateway absent ou pas en NodePort 30091 | `kubectl get svc -n monitoring` (étape 6.2) |
@@ -650,14 +669,15 @@ métriques (`val_pr_auc`, `val_best_threshold`...) : leurs runs sont donc compar
 
 ### Pipeline de déploiement — `jenkins/Jenkinsfile.deploy.txt`
 
-1. `dvc pull` des processeurs, puis **téléchargement du champion depuis le registre MLflow**
-   (`register_best_model.py --export-champion`).
+1. `dvc pull --force` des processeurs, puis **téléchargement du champion depuis le registre MLflow**
+   (`register_best_model.py --export-champion`). `--force` est nécessaire dès le 2e build : le
+   workspace garde le `metadata.json` réécrit par le build précédent.
 2. Build et push en parallèle de `<compte-dockerhub>/fraud-backend` et `…/fraud-frontend`, tagués
    **`<numéro de build>-<commit>`** (et `latest` comme simple alias).
 3. `kubectl set image` avec ce tag, puis annotation `change-cause` (visible dans
    `kubectl rollout history`).
-4. `kubectl rollout status` ; en cas d'échec (pod jamais prêt), **`kubectl rollout undo`
-   automatique** et build en échec.
+4. `kubectl rollout status --timeout=900s` ; en cas d'échec (pod jamais prêt), **`kubectl rollout undo`
+   automatique** et build en échec. Le délai couvre le téléchargement de l'image backend par minikube.
 
 ### Règle de décision
 
@@ -821,6 +841,7 @@ Revenir à la version précédente : `kubectl rollout undo deployment/fraud-back
 | Alerte taux de fraude | une seule prédiction frauduleuse pouvait la déclencher | ratio sur 10 min avec volume minimal |
 | Sécurité | webhook Slack commité ; endpoints d'écriture ouverts | webhook injecté au déploiement ; jeton optionnel |
 | Dépendances | CatBoost absent de l'image (modèle non chargeable s'il gagnait) ; streamlit, gunicorn, matplotlib inutilisés | candidats alignés ; dépendances inutiles retirées ; Evidently et httpx épinglés |
+| Image backend | 3,2 Go : xgboost avec CUDA/NCCL (~750 Mo) et mlflow jamais importé par l'API | 1,43 Go : `xgboost-cpu` (même version, même pickle) et pas de mlflow ; téléchargement dans minikube de > 5 min à ~1 min 20 |
 | Divers | chemin Windows par défaut, `PROCESSORS_DIR` ignoré, `"_main_"`, scripts qui sortaient en code 0 sur erreur | chemins relatifs au dépôt, variable lue, `__main__`, codes de sortie non nuls |
 
 ---

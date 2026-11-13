@@ -35,7 +35,7 @@ jupyter lab notebooks/              # run 01 → 02 → 03 → 04 in order
 ```
 - Every notebook does `from project_setup import ...`. That module finds the repo root (the first parent containing `.dvc/` or `.git`), so paths never depend on the working directory or machine.
 - Options are read from `.env` or the environment: `QUICK_RUN=1` (fast demo: tunes LightGBM and XGBoost on a sample, skips ensembles), `RUN_TUNING`, `RUN_ENSEMBLES`, `N_ITER`, `TUNING_MAX_ROWS`, `USE_MLFLOW`, `REBUILD_SUBSET`.
-- Notebooks are committed **without outputs** (the course recommends `nbstripout --install`). They need `data/raws/fraud_1M.csv` (Kaggle download, first time) or `dvc pull` once a version has been pushed. Notebook 02 raises `FileNotFoundError` with both hints when neither `fraud_600k.csv` nor `fraud_1M.csv` is present.
+- Notebooks are committed **without outputs** (the course recommends `nbstripout --install`; README step 9 adds `--drop-empty-cells --keep-id` and strips `metadata.language_info` so re-running a notebook produces no diff). They need `data/raws/fraud_1M.csv` (Kaggle download, first time) or `dvc pull` once a version has been pushed. Notebook 02 raises `FileNotFoundError` with both hints when neither `fraud_600k.csv` nor `fraud_1M.csv` is present.
 
 ### Backend (run from repo root)
 ```bash
@@ -46,7 +46,7 @@ PYTHONPATH=backend/src uvicorn backend.src.api:app --reload --port 8000
 - `api.py` does `from preprocessing import …`, so `backend/src` must be on `PYTHONPATH`.
 - `MODEL_REGISTRY_DIR` defaults to `<root>/artifacts/mlflow/Best_Fraud_LightGBM/1.0.0`; `PROCESSORS_DIR` (read in `PreprocessingFraud.__init__`) defaults to `<root>/artifacts/preprocessing`.
 - The app sets `root_path="/api"`. Swagger is at `http://localhost:8000/docs`.
-- Root `requirements.txt` holds the broader dev/training deps (xgboost, catboost, mlflow, dvc, pytest, httpx). `backend/requirements.txt` must keep scikit-learn, lightgbm, xgboost and catboost at the **same versions** as the root file: any of the four CT candidates can become the served pickle.
+- Root `requirements.txt` holds the broader dev/training deps (xgboost, catboost, mlflow, dvc, pytest, httpx). `backend/requirements.txt` must keep scikit-learn, lightgbm, xgboost and catboost at the **same versions** as the root file: any of the four CT candidates can become the served pickle. The backend installs **`xgboost-cpu`** (same version, same `import xgboost`, no CUDA/NCCL libraries) and deliberately has **no `mlflow`**: the API only loads the exported pickle, and the model pickles reference only xgboost/sklearn/numpy. This brought the image from 3.2 GB to 1.43 GB. Re-check `/health` and `test_fraud_scenario.py` against a freshly built image after any change there.
 
 ### Tests
 ```bash
@@ -132,7 +132,9 @@ The Jenkinsfiles are `.txt` and are referenced from Jenkins job configs. Stages:
 1. `IMAGE_TAG = <BUILD_NUMBER>-<git short sha>`.
 2. `dvc pull` of the artifacts, then `register_best_model.py --export-champion` replaces the model with the registry champion (keeps the DVC model if no champion exists).
 3. Docker build and push of `<compte-dockerhub>/fraud-backend` and `…/fraud-frontend` with `:$IMAGE_TAG` and `:latest`, in parallel.
-4. `kubectl set image …:$IMAGE_TAG` + `kubernetes.io/change-cause` annotation, then `kubectl rollout status`; on failure, `kubectl rollout undo` and exit 1.
+4. `kubectl set image …:$IMAGE_TAG` + `kubernetes.io/change-cause` annotation, then `kubectl rollout status --timeout=900s` (minikube may need minutes to pull the backend image); on failure, `kubectl rollout undo` and exit 1.
+
+The `dvc pull` calls in this pipeline use `--force`: Jenkins reuses the workspace, and the previous build's `--export-champion` rewrote `metadata.json`, so a plain `dvc pull` refuses to overwrite it and every build after the first fails.
 
 The frontend is built with `--build-arg NEXT_PUBLIC_API_URL=http://api.fraud.local`. `NEXT_PUBLIC_*` values are baked in at build time (docker-compose passes it as a build arg too); there is no frontend ConfigMap.
 
@@ -148,6 +150,7 @@ The Jenkins agent image is `jenkins/Dockerfile`. It provides Python 3.11 in `/op
 ### Networking and hard-coded endpoints
 - Ingress hosts: `fraud.local` routes to the frontend and `api.fraud.local` to the backend.
 - The backend Service is a NodePort on **30080**. Jenkins reaches it at `API_URL=http://192.168.49.2:30080` and the Pushgateway at `PUSHGATEWAY_URL=http://192.168.49.2:30091`, both set in the `environment` block of `Jenkinsfile.ml.txt` (minikube IP). Update them when the cluster changes.
+- The Jenkins container joins the `minikube` Docker network with a **fixed IP `192.168.49.100`**. Without it, Jenkins can start first after a reboot and take `192.168.49.2`, and `minikube start` then fails with `Address already in use`.
 - CORS allow-list in `api.py`: `CORS_ORIGINS` env, default `localhost:3000`, `127.0.0.1:3000`, `fraud.local`.
 - `frontend/src/services/api.ts` covers predict (reads `probabilities`), CSV batch, and health. `app/monitoring/page.tsx` fetches the drift, metadata, health, and metrics-summary endpoints directly, and embeds `/drift-report` in an iframe.
 
