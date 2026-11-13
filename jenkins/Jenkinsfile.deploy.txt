@@ -46,8 +46,11 @@ pipeline {
                     . /opt/venv-fraud/bin/activate
                     dvc remote modify origin --local user "${DAGSHUB_USER}"
                     dvc remote modify origin --local password "${DAGSHUB_TOKEN}"
-                    dvc pull artifacts/preprocessing/ --jobs 1
-                    dvc pull artifacts/mlflow/Best_Fraud_LightGBM/ --jobs 1
+                    # --force : le stage « Fetch Champion Model » du build précédent a réécrit
+                    # model.pkl / metadata.json dans ce workspace ; sans --force, DVC refuse
+                    # de les écraser et le pipeline échoue dès le 2e build.
+                    dvc pull artifacts/preprocessing/ --jobs 1 --force
+                    dvc pull artifacts/mlflow/Best_Fraud_LightGBM/ --jobs 1 --force
                 '''
             }
         }
