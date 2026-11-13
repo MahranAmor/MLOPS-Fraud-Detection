@@ -128,11 +128,13 @@ export async function getModelInfo() {
   return response.json();
 }
 /**
- * Live stream - Non implémenté
+ * Live stream - Non implémenté : le backend n'expose aucun flux (SSE).
+ * Renvoie null au lieu de lever une exception, pour que la page Live affiche
+ * un message au lieu de faire planter toute l'application.
  */
 export function createLiveStream(
   onMessage: (data: any) => void,
   onError: (error: Event) => void
-): EventSource {
-  throw new Error('Live stream not implemented yet');
+): EventSource | null {
+  return null;
 }

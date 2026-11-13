@@ -35,6 +35,7 @@ const CATEGORY_EMOJI: Record<string, string> = {
 export default function LivePage() {
   const [transactions, setTransactions] = useState<LiveTransaction[]>([]);
   const [connected, setConnected] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
   const [stats, setStats] = useState({ total: 0, frauds: 0 });
   const esRef = useRef<EventSource | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -55,6 +56,11 @@ export default function LivePage() {
       },
       () => setConnected(false),
     );
+    // Pas de flux côté backend : on l'indique au lieu de rester sur « Connecting... »
+    if (!es) {
+      setUnavailable(true);
+      return;
+    }
     esRef.current = es;
     es.onopen = () => setConnected(true);
 
@@ -92,7 +98,7 @@ export default function LivePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 24, border: '1px solid', borderColor: connected ? 'rgba(0,230,118,0.3)' : 'rgba(255,51,85,0.3)', background: connected ? 'rgba(0,230,118,0.05)' : 'rgba(255,51,85,0.05)' }}>
           <span className={`status-dot ${connected ? 'online' : ''}`} style={!connected ? { background: 'var(--fraud-red)', boxShadow: '0 0 8px var(--fraud-red)' } : {}} />
           <span style={{ fontSize: 12, fontWeight: 700, color: connected ? 'var(--safe-green)' : 'var(--fraud-red)' }}>
-            {connected ? 'Connected' : 'Connecting...'}
+            {connected ? 'Connected' : unavailable ? 'Unavailable' : 'Connecting...'}
           </span>
         </div>
       </div>
@@ -118,10 +124,12 @@ export default function LivePage() {
         <div className="card" style={{ padding: '60px 32px', textAlign: 'center' }}>
           <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.4 }}>📡</div>
           <div style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            Waiting for transactions...
+            {unavailable ? 'Live stream not available yet' : 'Waiting for transactions...'}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Transactions will appear here in real-time as they come in.
+            {unavailable
+              ? 'The API does not expose a real-time stream. Use Predict or Batch to score transactions.'
+              : 'Transactions will appear here in real-time as they come in.'}
           </div>
         </div>
       )}
